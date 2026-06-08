@@ -6,7 +6,7 @@ Este proyecto es una aplicación descentralizada (DApp) diseñada para la gesti�
 
 ## Arquitectura del Proyecto
 
-El proyecto está organizado en las siguientes carpetas dentro de `CertificadosBlockchain/`:
+El proyecto está organizado en las siguientes carpetas dentro de `FirmasDigitales/FirmasDigitales/`:
 
 * **`blockchain/`**: Contiene el entorno Hardhat. Aloja el Smart Contract de Solidity (`contracts/`), sus pruebas de Mocha (`test/`) y el script de despliegue de Hardhat Ignition (`ignition/`).
 * **`backend/`**: Servidor API en Node.js/Express. Se conecta a Microsoft SQL Server mediante Sequelize. Se encarga de la gestión de la base de datos, generación de marcas de agua diagonales, códigos QR dinámicos reales, y realiza todas las transacciones con Ethereum (billetera del backend) de forma transparente para los usuarios.
