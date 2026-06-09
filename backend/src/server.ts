@@ -11,6 +11,8 @@ import { ethers } from "ethers";
 import QRCode from "qrcode";
 
 import { sequelize, User, Document, Collaborator, AuditLog } from "./models";
+// Importamos de manera segura nuestro nuevo servicio de notificaciones modular
+import { NotificationService } from "./services/notificationService";
 
 dotenv.config();
 
@@ -120,6 +122,7 @@ async function generateCertificatePdf(doc: Document, finalHash: string, allCols:
     color: rgb(0.46, 0.23, 0.65),
   });
 
+  // Write certificate header title text safely
   certPage.drawText("CERTIFICADO DE AUTENTICIDAD ACADEMICA", {
     x: 50,
     y: 746,
@@ -369,6 +372,19 @@ app.post("/api/documents", upload.single("pdf"), async (req, res) => {
         },
         { transaction }
       );
+
+      // ==========================================================
+      // INTEGRACIÓN DEL SERVICIO MODULAR DE CORREO Y WHATSAPP LOCAL
+      // ==========================================================
+      NotificationService.sendAll({
+        toEmail: col.email,
+        toPhone: col.phone,
+        validatorName: col.name,
+        studentName: estudiante,
+        certificateCode: codigo,
+        token: token
+      });
+      // ==========================================================
     }
 
     // Update document with fechaEnvioSolicitud
@@ -577,7 +593,7 @@ app.post("/api/documents/sign/:token", async (req, res) => {
         await AuditLog.create({
           documentId: doc.id,
           action: "Registro_Blockchain",
-          details: `El certificado fue registrado exitosamente en la Blockchain mediante wallet institucional. Hash Tx: ${blockchainDetails.txHash}`,
+          details: `El certificado fue registrado exitosamente en la Blockchain mediante wallet institutional. Hash Tx: ${blockchainDetails.txHash}`,
         });
       } catch (bcError: any) {
         console.error("Fallo el registro automatico en Blockchain, guardando como ready_for_blockchain:", bcError);
