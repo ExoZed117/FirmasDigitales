@@ -76,7 +76,8 @@ Dado que la aplicación institucional utiliza rutas en el cliente (como `/sign/T
 
 ---
 
-## 4. Consideraciones con la Blockchain (Metamask)
+## 4. Consideraciones con la Blockchain (Metamask y Conectividad)
 
-* **Red Local en Metamask**: Para firmar transacciones desde el portal institucional desplegado, tu billetera MetaMask debe estar conectada a la red **Hardhat Localhost** (`http://localhost:8545`, Chain ID: `31337`).
-* Dado que MetaMask se ejecuta localmente en la máquina del validador, se conectará directamente a `localhost:8545` de su PC. Si se está interactuando desde dispositivos móviles o redes externas, también puedes exponer el puerto de Hardhat (`8545`) mediante ngrok (`ngrok http 8545`) y añadir esa red RPC personalizada en MetaMask.
+* **Sin Exposición del Puerto de Hardhat (8545)**: Gracias a la arquitectura de proxy implementada, las consultas a la blockchain en el portal público de verificación y las firmas de los colaboradores se canalizan por completo a través del backend (puerto `3001`). Por ende, **no es necesario exponer el puerto de Hardhat (8545) a internet bajo ninguna circunstancia**.
+* **MetaMask en el Panel Administrativo**: El panel administrativo se ejecuta localmente en tu laptop, donde también corre el nodo de Hardhat. Por lo tanto, tu billetera MetaMask se conectará directamente a `http://localhost:8545` (Chain ID: `31337`) a nivel local sin necesidad de realizar ninguna configuración externa de red ni exponer ningún puerto.
+* **Firmas de Colaboradores**: Al abrir el link de firma desde redes externas o celulares, los validadores interactúan únicamente con la interfaz web y confirman la firma mediante un OTP y un canvas de firma digital. Esto envía los datos mediante HTTP al backend (puerto `3001`, a través del túnel de ngrok), y el backend realiza la transacción final en la blockchain de manera local y transparente.

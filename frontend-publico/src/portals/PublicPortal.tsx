@@ -1,6 +1,4 @@
 import React, { useState, useRef, useEffect } from "react";
-import { ethers } from "ethers";
-import { CONTRACT_ADDRESS, CONTRACT_ABI } from "../context/contractConfig";
 import { Html5Qrcode } from "html5-qrcode";
 
 interface VerifiedData {
@@ -127,34 +125,19 @@ export const PublicPortal: React.FC = () => {
   };
 
   const verifyHashOnChain = async (hashHex: string) => {
-    const provider = new ethers.JsonRpcProvider("http://localhost:8545");
-    const contractInstance = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, provider);
-
-    const result = await contractInstance.verificarCertificado(hashHex);
+    const API_URL = localStorage.getItem("blockcert_api_url") || "http://localhost:3001";
     
-    if (!result.existe) {
-      throw new Error("CERTIFICADO NO REGISTRADO O ALTERADO: El hash calculado de este PDF no coincide con ningun certificado emitido en la Blockchain.");
+    // Llamar al proxy del backend para consultar los datos del contrato en la Blockchain
+    const responseBc = await fetch(`${API_URL}/api/blockchain/verify-hash/${hashHex}`);
+    if (!responseBc.ok) {
+      const errJson = await responseBc.json();
+      throw new Error(errJson.error || "CERTIFICADO NO REGISTRADO O ALTERADO: El hash calculado de este PDF no coincide con ningun certificado emitido en la Blockchain.");
     }
-
-    const historyResult = await contractInstance.consultarHistorial(hashHex);
-
-    setVerifiedData({
-      existe: result.existe,
-      codigo: result.codigo,
-      estudiante: result.estudiante,
-      fechaEmision: Number(historyResult.fechaEmision) * 1000,
-      valido: historyResult.valido,
-      motivoRevocacion: historyResult.motivoRevocacion,
-      emisor: historyResult.emisor,
-      estudianteWallet: historyResult.estudianteWallet,
-      recepcionConfirmada: historyResult.recepcionConfirmada,
-      fechaRecepcion: Number(historyResult.fechaRecepcion) * 1000,
-      cargoEmisor: historyResult.cargoEmisor,
-      fechaRevocacion: Number(historyResult.fechaRevocacion) * 1000,
-    });
+    
+    const dataBc = await responseBc.json();
+    setVerifiedData(dataBc);
 
      try {
-      const API_URL = localStorage.getItem("blockcert_api_url") || "http://localhost:3001";
       const response = await fetch(`${API_URL}/api/verify/${hashHex}`);
       if (response.ok) {
         const data = await response.json();
@@ -176,15 +159,14 @@ export const PublicPortal: React.FC = () => {
     setDocHash(null);
 
     try {
-      const provider = new ethers.JsonRpcProvider("http://localhost:8545");
-      const contractInstance = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, provider);
-
-      const result = await contractInstance.consultarCertificado(inputCode.trim());
-      
-      if (!result.existe) {
-        throw new Error("CODIGO NO ENCONTRADO: El codigo ingresado no corresponde a ningun certificado registrado en la Blockchain.");
+      const API_URL = localStorage.getItem("blockcert_api_url") || "http://localhost:3001";
+      const responseBc = await fetch(`${API_URL}/api/blockchain/verify-code/${inputCode.trim()}`);
+      if (!responseBc.ok) {
+        const errJson = await responseBc.json();
+        throw new Error(errJson.error || "CODIGO NO ENCONTRADO: El codigo ingresado no corresponde a ningun certificado registrado en la Blockchain.");
       }
 
+      const result = await responseBc.json();
       setDocHash(result.hashDocumento);
       await verifyHashOnChain(result.hashDocumento);
     } catch (err: any) {
@@ -278,14 +260,14 @@ export const PublicPortal: React.FC = () => {
 
       setInputCode(codeToVerify);
 
-      const provider = new ethers.JsonRpcProvider("http://localhost:8545");
-      const contractInstance = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, provider);
-      const result = await contractInstance.consultarCertificado(codeToVerify);
-
-      if (!result.existe) {
-        throw new Error(`CODIGO QR NO VALIDO: Se decodifico el codigo "${codeToVerify}", pero no esta registrado en la Blockchain.`);
+      const API_URL = localStorage.getItem("blockcert_api_url") || "http://localhost:3001";
+      const responseBc = await fetch(`${API_URL}/api/blockchain/verify-code/${codeToVerify}`);
+      if (!responseBc.ok) {
+        const errJson = await responseBc.json();
+        throw new Error(errJson.error || `CODIGO QR NO VALIDO: Se decodifico el codigo "${codeToVerify}", pero no esta registrado en la Blockchain.`);
       }
 
+      const result = await responseBc.json();
       setDocHash(result.hashDocumento);
       await verifyHashOnChain(result.hashDocumento);
     } catch (err: any) {
@@ -320,14 +302,14 @@ export const PublicPortal: React.FC = () => {
 
             setInputCode(codeToVerify);
             
-            const provider = new ethers.JsonRpcProvider("http://localhost:8545");
-            const contractInstance = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, provider);
-            const result = await contractInstance.consultarCertificado(codeToVerify);
-
-            if (!result.existe) {
-              throw new Error(`CODIGO QR SIMULADO NO VALIDO: Se obtuvo el codigo "${codeToVerify}" del nombre del archivo, pero no esta registrado en la Blockchain.`);
+            const API_URL = localStorage.getItem("blockcert_api_url") || "http://localhost:3001";
+            const responseBc = await fetch(`${API_URL}/api/blockchain/verify-code/${codeToVerify}`);
+            if (!responseBc.ok) {
+              const errJson = await responseBc.json();
+              throw new Error(errJson.error || `CODIGO QR SIMULADO NO VALIDO: Se obtuvo el codigo "${codeToVerify}" del nombre del archivo, pero no esta registrado en la Blockchain.`);
             }
 
+            const result = await responseBc.json();
             setDocHash(result.hashDocumento);
             await verifyHashOnChain(result.hashDocumento);
           } catch (err2: any) {

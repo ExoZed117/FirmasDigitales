@@ -33,7 +33,9 @@ try {
     "function emitirCertificado(string _codigo, string _estudiante, address _estudianteWallet, bytes32 _hashDocumento) external",
     "function confirmarRecepcion(bytes32 _hashDocumento) external",
     "function revocarCertificado(bytes32 _hashDocumento, string _motivo) external",
-    "function verificarCertificado(bytes32 _hashDocumento) external view returns (bool existe, string codigo, string estudiante, uint256 fechaEmision, bool valido, string motivoRevocacion, address emisor, address estudianteWallet, bool recepcionConfirmada, uint256 fechaRecepcion)"
+    "function verificarCertificado(bytes32 _hashDocumento) external view returns (bool existe, string codigo, string estudiante, uint256 fechaEmision, bool valido, string motivoRevocacion, address emisor, address estudianteWallet, bool recepcionConfirmada, uint256 fechaRecepcion)",
+    "function consultarCertificado(string _codigo) external view returns (bool existe, string estudiante, bytes32 hashDocumento, uint256 fechaEmision, bool valido, string motivoRevocacion, address emisor, address estudianteWallet, bool recepcionConfirmada, uint256 fechaRecepcion)",
+    "function consultarHistorial(bytes32 _hashDocumento) external view returns (uint256 fechaEmision, address emisor, string cargoEmisor, bool recepcionConfirmada, uint256 fechaRecepcion, address estudianteWallet, bool valido, uint256 fechaRevocacion, string motivoRevocacion)"
   ];
   blockchainContract = new ethers.Contract(contractAddress, contractAbi, wallet);
   console.log("Blockchain Client initialized with wallet:", wallet.address);
@@ -736,6 +738,77 @@ app.get("/api/verify/:hash", async (req, res) => {
     res.json(doc);
   } catch (error: any) {
     console.error("Error verifying document by hash:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Proxy para consultar verificacion por hash en Blockchain
+app.get("/api/blockchain/verify-hash/:hash", async (req, res) => {
+  try {
+    const { hash } = req.params;
+    if (!blockchainContract) {
+      return res.status(503).json({ error: "Cliente blockchain no inicializado" });
+    }
+
+    console.log(`[Proxy] consultando verificarCertificado para hash ${hash}`);
+    const result = await blockchainContract.verificarCertificado(hash);
+    
+    if (!result.existe) {
+      return res.status(404).json({ error: "CERTIFICADO NO REGISTRADO O ALTERADO: El hash calculado de este PDF no coincide con ningun certificado emitido en la Blockchain." });
+    }
+
+    console.log(`[Proxy] consultando consultarHistorial para hash ${hash}`);
+    const historyResult = await blockchainContract.consultarHistorial(hash);
+
+    res.json({
+      existe: result.existe,
+      codigo: result.codigo,
+      estudiante: result.estudiante,
+      fechaEmision: Number(historyResult.fechaEmision) * 1000,
+      valido: historyResult.valido,
+      motivoRevocacion: historyResult.motivoRevocacion,
+      emisor: historyResult.emisor,
+      estudianteWallet: historyResult.estudianteWallet,
+      recepcionConfirmada: historyResult.recepcionConfirmada,
+      fechaRecepcion: Number(historyResult.fechaRecepcion) * 1000,
+      cargoEmisor: historyResult.cargoEmisor,
+      fechaRevocacion: Number(historyResult.fechaRevocacion) * 1000
+    });
+  } catch (error: any) {
+    console.error("Error en proxy blockchain verify-hash:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Proxy para consultar verificacion por codigo unico en Blockchain
+app.get("/api/blockchain/verify-code/:code", async (req, res) => {
+  try {
+    const { code } = req.params;
+    if (!blockchainContract) {
+      return res.status(503).json({ error: "Cliente blockchain no inicializado" });
+    }
+
+    console.log(`[Proxy] consultando consultarCertificado para codigo ${code}`);
+    const result = await blockchainContract.consultarCertificado(code.trim());
+    
+    if (!result.existe) {
+      return res.status(404).json({ error: "CODIGO NO ENCONTRADO: El codigo ingresado no corresponde a ningun certificado registrado en la Blockchain." });
+    }
+
+    res.json({
+      existe: result.existe,
+      estudiante: result.estudiante,
+      hashDocumento: result.hashDocumento,
+      fechaEmision: Number(result.fechaEmision) * 1000,
+      valido: result.valido,
+      motivoRevocacion: result.motivoRevocacion,
+      emisor: result.emisor,
+      estudianteWallet: result.estudianteWallet,
+      recepcionConfirmada: result.recepcionConfirmada,
+      fechaRecepcion: Number(result.fechaRecepcion) * 1000
+    });
+  } catch (error: any) {
+    console.error("Error en proxy blockchain verify-code:", error);
     res.status(500).json({ error: error.message });
   }
 });
