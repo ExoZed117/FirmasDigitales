@@ -29,6 +29,7 @@ let provider: ethers.JsonRpcProvider;
 let wallet: ethers.Wallet;
 let blockchainContract: ethers.Contract;
 
+// Force nodemon restart to load new CONTRACT_ADDRESS from .env
 try {
   provider = new ethers.JsonRpcProvider(providerUrl);
   wallet = new ethers.Wallet(privateKey, provider);
@@ -42,6 +43,7 @@ try {
     "function consultarHistorial(bytes32 _hashDocumento) external view returns (uint256 fechaEmision, address emisor, string cargoEmisor, bool recepcionConfirmada, uint256 fechaRecepcion, address estudianteWallet, bool valido, uint256 fechaRevocacion, string motivoRevocacion)"
   ];
   blockchainContract = new ethers.Contract(contractAddress, contractAbi, wallet);
+  console.log("Blockchain Client initialized with contract address:", contractAddress);
   console.log("Blockchain Client initialized with wallet:", wallet.address);
 } catch (err) {
   console.error("Failed to initialize Blockchain Client:", err);
