@@ -18,7 +18,7 @@ import { sequelize, User, Document, Collaborator, AuditLog } from "./models";
 // Importamos de manera segura nuestro nuevo servicio de notificaciones modular
 import { NotificationService } from "./services/notificationService";
 
-dotenv.config();
+dotenv.config({ override: true });
 
 // Blockchain Client Setup
 const providerUrl = process.env.PROVIDER_URL || "http://127.0.0.1:8545";
@@ -43,6 +43,7 @@ try {
     "function consultarHistorial(bytes32 _hashDocumento) external view returns (uint256 fechaEmision, address emisor, string cargoEmisor, bool recepcionConfirmada, uint256 fechaRecepcion, address estudianteWallet, bool valido, uint256 fechaRevocacion, string motivoRevocacion)"
   ];
   blockchainContract = new ethers.Contract(contractAddress, contractAbi, wallet);
+  console.log("Blockchain Client initialized with provider URL:", providerUrl);
   console.log("Blockchain Client initialized with contract address:", contractAddress);
   console.log("Blockchain Client initialized with wallet:", wallet.address);
 } catch (err) {
@@ -408,6 +409,12 @@ try {
       { transaction }
     );
 
+    // Capturar URLs dinámicamente basadas en el origen de la solicitud
+    const reqOrigin = (req.headers.origin as string) || (req.headers.referer ? new URL(req.headers.referer).origin : undefined);
+    const frontendUrl = reqOrigin || process.env.FRONTEND_URL;
+    const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+    const backendUrl = `${protocol}://${req.headers.host}`;
+
     // Create Collaborators and invitations
     const createdCols = [];
     for (const col of collaboratorsData) {
@@ -447,7 +454,9 @@ try {
         validatorName: col.name,
         studentName: estudiante,
         certificateCode: codigo,
-        token: token
+        token: token,
+        frontendUrl: frontendUrl,
+        backendUrl: backendUrl
       });
       // ==========================================================
     }

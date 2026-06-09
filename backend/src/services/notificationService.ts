@@ -42,6 +42,8 @@ interface NotificationPayload {
   studentName: string;
   certificateCode: string;
   token: string;
+  frontendUrl?: string;
+  backendUrl?: string;
 }
 
 export class NotificationService {
@@ -49,8 +51,8 @@ export class NotificationService {
    * CANAL 1: Envío de Correo Electrónico Real via SMTP
    */
   static async sendEmail(payload: NotificationPayload): Promise<boolean> {
-    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
-    const backendUrl = process.env.BACKEND_URL || "http://localhost:3001";
+    const frontendUrl = payload.frontendUrl || process.env.FRONTEND_URL || "http://localhost:5173";
+    const backendUrl = payload.backendUrl || process.env.BACKEND_URL || "http://localhost:3001";
     const urlFirma = `${frontendUrl}/sign/${payload.token}?apiUrl=${backendUrl}`;
     
     try {
@@ -92,8 +94,8 @@ export class NotificationService {
     }
 
     try {
-      const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
-      const backendUrl = process.env.BACKEND_URL || "http://localhost:3001";
+      const frontendUrl = payload.frontendUrl || process.env.FRONTEND_URL || "http://localhost:5173";
+      const backendUrl = payload.backendUrl || process.env.BACKEND_URL || "http://localhost:3001";
       const urlFirma = `${frontendUrl}/sign/${payload.token}?apiUrl=${backendUrl}`;
       let cleanPhone = payload.toPhone.replace(/\D/g, "");
       

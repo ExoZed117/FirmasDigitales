@@ -2,7 +2,7 @@ import { Sequelize, DataTypes, Model } from "sequelize";
 import dotenv from "dotenv";
 import path from "path";
 
-dotenv.config();
+dotenv.config({ override: true });
 
 const dialect = (process.env.DB_DIALECT || "sqlite") as "sqlite" | "mssql";
 let sequelize: Sequelize;
