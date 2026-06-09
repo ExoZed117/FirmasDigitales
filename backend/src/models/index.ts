@@ -101,6 +101,7 @@ export class Document extends Model {
   public blockchainContractAddress!: string | null;
   public blockchainTimestamp!: Date | null;
   public estudianteSignatureImage!: string | null;
+  public requireFacial!: boolean;
   public collaborators!: Collaborator[];
   public auditLogs!: AuditLog[];
 }
@@ -195,6 +196,11 @@ Document.init(
     estudianteSignatureImage: {
       type: DataTypes.TEXT("long"),
       allowNull: true,
+    },
+    requireFacial: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
     },
   },
   {

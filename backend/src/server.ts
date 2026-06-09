@@ -29,6 +29,7 @@ try {
   provider = new ethers.JsonRpcProvider(providerUrl);
   wallet = new ethers.Wallet(privateKey, provider);
   const contractAbi = [
+    "function owner() external view returns (address)",
     "function emitirCertificado(string _codigo, string _estudiante, address _estudianteWallet, bytes32 _hashDocumento) external",
     "function confirmarRecepcion(bytes32 _hashDocumento) external",
     "function revocarCertificado(bytes32 _hashDocumento, string _motivo) external",
@@ -308,7 +309,7 @@ app.get("/api/documents/admin", async (req, res) => {
 app.post("/api/documents", upload.single("pdf"), async (req, res) => {
   const transaction = await sequelize.transaction();
   try {
-    const { codigo, estudiante, estudianteWallet, collaboratorsJson } = req.body;
+    const { codigo, estudiante, estudianteWallet, collaboratorsJson, requireFacial } = req.body;
     if (!req.file) {
       return res.status(400).json({ error: "Debe subir un archivo PDF" });
     }
@@ -321,6 +322,8 @@ app.post("/api/documents", upload.single("pdf"), async (req, res) => {
       return res.status(400).json({ error: "El codigo de certificado ya esta registrado en la base de datos" });
     }
 
+    const requireFacialBool = requireFacial === "true" || requireFacial === true;
+
     // Create Document
     const newDoc = await Document.create(
       {
@@ -329,6 +332,7 @@ app.post("/api/documents", upload.single("pdf"), async (req, res) => {
         estudianteWallet: estudianteWallet || null,
         status: "pending",
         originalPath: `uploads/original/${req.file.filename}`,
+        requireFacial: requireFacialBool,
       },
       { transaction }
     );
@@ -782,12 +786,124 @@ app.post("/api/documents/revoke/:hash", async (req, res) => {
   }
 });
 
+// Helper: Sincronización automática de base de datos con blockchain al arrancar
+async function synchronizeBlockchainOnStartup() {
+  if (!blockchainContract) {
+    console.warn("Blockchain Client no inicializado. Omitiendo sincronización de arranque.");
+    return;
+  }
+
+  try {
+    console.log("--------------------------------------------------");
+    console.log("Iniciando validación y sincronización de Blockchain en el arranque...");
+
+    // Test contract owner to verify connectivity
+    try {
+      const owner = await blockchainContract.owner();
+      console.log(`[+] Conexión de Blockchain exitosa. Owner del contrato: ${owner}`);
+    } catch (connErr: any) {
+      console.error("[-] No se pudo conectar al Smart Contract. Saltando sincronización de arranque:", connErr.message);
+      return;
+    }
+
+    const docs = await Document.findAll();
+    console.log(`[i] Encontrados ${docs.length} documentos en la base de datos.`);
+
+    let syncedCount = 0;
+    for (const doc of docs) {
+      if (doc.status === "registered" || doc.status === "ready_for_blockchain") {
+        if (!doc.hashDocumento) continue;
+
+        try {
+          // Verify on-chain presence
+          const onChain = await blockchainContract.verificarCertificado(doc.hashDocumento);
+
+          if (!onChain.existe) {
+            console.log(`[!] Certificado desincronizado: ${doc.codigo} (${doc.estudiante}) no está en Blockchain. Registrando...`);
+            const studentWallet = (doc.estudianteWallet && ethers.isAddress(doc.estudianteWallet))
+              ? doc.estudianteWallet
+              : ethers.ZeroAddress;
+
+            const tx = await blockchainContract.emitirCertificado(
+              doc.codigo,
+              doc.estudiante,
+              studentWallet,
+              doc.hashDocumento
+            );
+            console.log(`    Transacción enviada: ${tx.hash}. Esperando confirmación...`);
+            const receipt = await tx.wait(1);
+
+            if (receipt) {
+              console.log(`    [+] Confirmado en bloque ${receipt.blockNumber}!`);
+              doc.blockchainTxHash = receipt.hash;
+              doc.blockchainBlockNumber = receipt.blockNumber;
+              doc.blockchainContractAddress = contractAddress;
+              doc.status = "registered";
+              await doc.save();
+              syncedCount++;
+            }
+          }
+        } catch (itemErr: any) {
+          console.error(`[-] Error al verificar/emitir certificado ${doc.codigo}:`, itemErr.message);
+        }
+      }
+    }
+
+    if (syncedCount > 0) {
+      console.log(`[+] Sincronización de arranque completada. Se re-registraron ${syncedCount} certificados.`);
+    } else {
+      console.log("[+] Todos los certificados de la base de datos están sincronizados en Blockchain.");
+    }
+    console.log("--------------------------------------------------");
+  } catch (err: any) {
+    console.error("[-] Error en la sincronización de arranque de Blockchain:", err);
+  }
+}
+
+async function runMigrations() {
+  try {
+    const dialect = sequelize.getDialect();
+    if (dialect === "mssql") {
+      const [results] = await sequelize.query(
+        "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Documents' AND COLUMN_NAME = 'requireFacial'"
+      );
+      if (results.length === 0) {
+        console.log("[Migration] Adding 'requireFacial' column to 'Documents' table...");
+        await sequelize.query("ALTER TABLE Documents ADD requireFacial BIT NOT NULL DEFAULT 0");
+        console.log("[Migration] Column 'requireFacial' added successfully.");
+      }
+    } else {
+      const [results] = await sequelize.query("PRAGMA table_info(Documents)") as any[];
+      const hasColumn = results.some((col: any) => col.name === "requireFacial");
+      if (!hasColumn) {
+        console.log("[Migration] Adding 'requireFacial' column to 'Documents' table (SQLite)...");
+        await sequelize.query("ALTER TABLE Documents ADD COLUMN requireFacial BOOLEAN NOT NULL DEFAULT 0");
+        console.log("[Migration] Column 'requireFacial' added successfully.");
+      }
+    }
+  } catch (err) {
+    console.error("[-] Error running database migrations:", err);
+  }
+}
+
+// Global Error Handler
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  console.error("Unhandled error:", err);
+  res.status(err.status || 500).json({
+    error: err.message || "Error interno del servidor",
+  });
+});
+
 // Connect to DB and start Server
-sequelize
-  .sync()
+runMigrations()
+  .then(() => sequelize.sync())
   .then(() => {
     app.listen(PORT, () => {
       console.log(`Backend server running on http://localhost:${PORT}`);
+      // Ejecutar sincronización en segundo plano al arrancar
+      synchronizeBlockchainOnStartup().catch((syncErr) => {
+        console.error("[-] Error crítico en la sincronización automática al arrancar:", syncErr);
+      });
     });
   })
   .catch((err) => {

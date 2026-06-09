@@ -6,7 +6,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/server.js",
-    "dev": "nodemon src/server.ts"
+    "dev": "nodemon src/server.ts",
+    "sync-blockchain": "ts-node src/sync-blockchain.ts"
   },
   "keywords": [],
   "author": "",

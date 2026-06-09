@@ -92,12 +92,18 @@ export class NotificationService {
     try {
       const urlFirma = `http://localhost:5173/sign/${payload.token}`;
       let cleanPhone = payload.toPhone.replace(/\D/g, "");
+      
+      // Auto-completar prefijo de Bolivia (591) si tiene 8 dígitos
+      if (cleanPhone.length === 8) {
+        cleanPhone = "591" + cleanPhone;
+      }
+
       const chatId = `${cleanPhone}@c.us`;
 
       const mensaje = `Hola ${payload.validatorName}, has sido asignado para validar el certificado de ${payload.studentName} (Código: ${payload.certificateCode}). Por favor ingresa aquí para revisar y plasmar tu firma digital: ${urlFirma}`;
 
       await whatsappClient.sendMessage(chatId, mensaje);
-      console.log(`[NotificationService] 📱 WhatsApp enviado con éxito a: ${payload.toPhone}`);
+      console.log(`[NotificationService] 📱 WhatsApp enviado con éxito a: ${cleanPhone}`);
       return true;
     } catch (error) {
       console.error(`[NotificationService Error] ❌ Error local de WhatsApp al enviar a ${payload.toPhone}:`, error);

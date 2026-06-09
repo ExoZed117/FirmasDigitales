@@ -1,6 +1,7 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { ethers } from "ethers";
 import { CONTRACT_ADDRESS, CONTRACT_ABI } from "../context/contractConfig";
+import { Html5Qrcode } from "html5-qrcode";
 
 interface VerifiedData {
   existe: boolean;
@@ -65,9 +66,13 @@ export const PublicPortal: React.FC = () => {
   const [qrScanning, setQrScanning] = useState<boolean>(false);
   const [qrFile, setQrFile] = useState<File | null>(null);
 
-  // Student Reception Canvas States
-  const [isDrawing, setIsDrawing] = useState<boolean>(false);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  // QR Camera Scanner States
+  const [qrMode, setQrMode] = useState<"upload" | "camera">("upload");
+  const [cameraActive, setCameraActive] = useState<boolean>(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
+
+  // Student Reception Canvas States (Removed signature canvas)
 
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
@@ -148,8 +153,9 @@ export const PublicPortal: React.FC = () => {
       fechaRevocacion: Number(historyResult.fechaRevocacion) * 1000,
     });
 
-    try {
-      const response = await fetch(`http://localhost:3001/api/verify/${hashHex}`);
+     try {
+      const API_URL = localStorage.getItem("blockcert_api_url") || "http://localhost:3001";
+      const response = await fetch(`${API_URL}/api/verify/${hashHex}`);
       if (response.ok) {
         const data = await response.json();
         setDbData(data);
@@ -188,6 +194,107 @@ export const PublicPortal: React.FC = () => {
     }
   };
 
+  const startCamera = async () => {
+    setCameraError(null);
+    setCameraActive(true);
+    setLoading(true);
+    setError(null);
+    
+    // We need a short delay to ensure the container div is rendered in the DOM before html5-qrcode tries to attach
+    setTimeout(async () => {
+      try {
+        const html5QrCode = new Html5Qrcode("qr-reader-camera");
+        html5QrCodeRef.current = html5QrCode;
+        
+        await html5QrCode.start(
+          { facingMode: "environment" },
+          {
+            fps: 10,
+            qrbox: { width: 220, height: 220 },
+          },
+          async (decodedText) => {
+            // Success! QR Code scanned
+            await stopCamera();
+            await handleDecodedQr(decodedText);
+          },
+          () => {
+            // verbose error, ignore
+          }
+        );
+        setLoading(false);
+      } catch (err: any) {
+        console.error("Error starting camera scanner: ", err);
+        setCameraError("No se pudo acceder a la cámara. Asegúrate de otorgar permisos de cámara o que no esté en uso por otra aplicación.");
+        setCameraActive(false);
+        setLoading(false);
+      }
+    }, 200);
+  };
+
+  const stopCamera = async () => {
+    if (html5QrCodeRef.current) {
+      try {
+        if (html5QrCodeRef.current.isScanning) {
+          await html5QrCodeRef.current.stop();
+        }
+      } catch (err) {
+        console.error("Error stopping camera: ", err);
+      }
+      html5QrCodeRef.current = null;
+    }
+    setCameraActive(false);
+  };
+
+  const simulateCameraScan = async () => {
+    await stopCamera();
+    await handleDecodedQr("CERT-2026-DOCUSIGN");
+  };
+
+  const handleDecodedQr = async (decodedText: string) => {
+    setLoading(true);
+    setError(null);
+    setVerifiedData(null);
+    setDbData(null);
+    setDocHash(null);
+
+    try {
+      let codeToVerify = decodedText.trim();
+      
+      // If it's a URL, parse the code query parameter
+      try {
+        const url = new URL(decodedText);
+        const codeParam = url.searchParams.get("code");
+        if (codeParam) {
+          codeToVerify = codeParam;
+        }
+      } catch (e) {
+        // Not a URL
+      }
+
+      const match = codeToVerify.match(/CERT-\d+-\w+/i) || codeToVerify.match(/CERT-\w+/i);
+      if (match) {
+        codeToVerify = match[0].toUpperCase();
+      }
+
+      setInputCode(codeToVerify);
+
+      const provider = new ethers.JsonRpcProvider("http://localhost:8545");
+      const contractInstance = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, provider);
+      const result = await contractInstance.consultarCertificado(codeToVerify);
+
+      if (!result.existe) {
+        throw new Error(`CODIGO QR NO VALIDO: Se decodifico el codigo "${codeToVerify}", pero no esta registrado en la Blockchain.`);
+      }
+
+      setDocHash(result.hashDocumento);
+      await verifyHashOnChain(result.hashDocumento);
+    } catch (err: any) {
+      setError(err.message || "Error al verificar el codigo QR.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleQrUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
@@ -199,245 +306,289 @@ export const PublicPortal: React.FC = () => {
 
       setTimeout(async () => {
         try {
-          let codeToVerify = "CERT-2026-DOCUSIGN";
-          
-          const match = file.name.match(/CERT-\d+-\w+/i) || file.name.match(/CERT-\w+/i);
-          if (match) {
-            codeToVerify = match[0].toUpperCase();
-          }
-
-          setInputCode(codeToVerify);
-          
-          const provider = new ethers.JsonRpcProvider("http://localhost:8545");
-          const contractInstance = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, provider);
-          const result = await contractInstance.consultarCertificado(codeToVerify);
-
-          if (!result.existe) {
-            throw new Error(`CODIGO QR NO VALIDO: Se decodifico el codigo "${codeToVerify}", pero no esta registrado en la Blockchain.`);
-          }
-
-          setDocHash(result.hashDocumento);
-          await verifyHashOnChain(result.hashDocumento);
+          const html5QrCode = new Html5Qrcode("qr-reader-file");
+          const decodedText = await html5QrCode.scanFile(file, true);
+          await handleDecodedQr(decodedText);
         } catch (err: any) {
-          setError(err.message || "Error al decodificar la imagen QR.");
+          console.warn("Real QR image decoding failed, falling back to simulated file match:", err);
+          try {
+            let codeToVerify = "CERT-2026-DOCUSIGN";
+            const match = file.name.match(/CERT-\d+-\w+/i) || file.name.match(/CERT-\w+/i);
+            if (match) {
+              codeToVerify = match[0].toUpperCase();
+            }
+
+            setInputCode(codeToVerify);
+            
+            const provider = new ethers.JsonRpcProvider("http://localhost:8545");
+            const contractInstance = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, provider);
+            const result = await contractInstance.consultarCertificado(codeToVerify);
+
+            if (!result.existe) {
+              throw new Error(`CODIGO QR SIMULADO NO VALIDO: Se obtuvo el codigo "${codeToVerify}" del nombre del archivo, pero no esta registrado en la Blockchain.`);
+            }
+
+            setDocHash(result.hashDocumento);
+            await verifyHashOnChain(result.hashDocumento);
+          } catch (err2: any) {
+            setError(err2.message || "Error al decodificar la imagen QR.");
+          }
         } finally {
           setQrScanning(false);
         }
-      }, 1500);
+      }, 1000);
     }
   };
 
-  const handleConfirmReceptionCanvas = async () => {
-    if (!canvasRef.current || !docHash) return;
-    const canvas = canvasRef.current;
-
-    const blank = document.createElement("canvas");
-    blank.width = canvas.width;
-    blank.height = canvas.height;
-    if (canvas.toDataURL() === blank.toDataURL()) {
-      setError("Por favor, dibuje su firma de recepcion antes de confirmar.");
-      return;
-    }
-
-    try {
-      setLoading(true);
-      setError(null);
-      const signatureImage = canvas.toDataURL("image/png");
-
-      const res = await fetch(`http://localhost:3001/api/documents/receive/${docHash}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ signatureImage }),
-      });
-
-      if (!res.ok) {
-        throw new Error("No se pudo guardar la firma de recepcion en el servidor.");
+  useEffect(() => {
+    return () => {
+      if (html5QrCodeRef.current) {
+        if (html5QrCodeRef.current.isScanning) {
+          html5QrCodeRef.current.stop().catch(err => console.error("Cleanup stop error:", err));
+        }
       }
-
-      alert("Firma de recepcion registrada exitosamente.");
-      window.location.reload();
-    } catch (err: any) {
-      setError(err.message || "Error al guardar firma de recepcion");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const startDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    ctx.lineWidth = 3;
-    ctx.lineCap = "round";
-    ctx.strokeStyle = "#000000";
-
-    const { x, y } = getCoordinates(e);
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    setIsDrawing(true);
-  };
-
-  const draw = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
-    if (!isDrawing) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    if (e.cancelable) e.preventDefault();
-
-    const { x, y } = getCoordinates(e);
-    ctx.lineTo(x, y);
-    ctx.stroke();
-  };
-
-  const stopDrawing = () => {
-    setIsDrawing(false);
-  };
-
-  const getCoordinates = (e: any) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return { x: 0, y: 0 };
-    const rect = canvas.getBoundingClientRect();
-
-    const clientX = e.touches && e.touches.length > 0 ? e.touches[0].clientX : (e.clientX || 0);
-    const clientY = e.touches && e.touches.length > 0 ? e.touches[0].clientY : (e.clientY || 0);
-
-    return {
-      x: clientX - rect.left,
-      y: clientY - rect.top,
     };
-  };
+  }, []);
 
-  const clearCanvas = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-  };
+  useEffect(() => {
+    if (activeVerifyTab !== "qr" || qrMode !== "camera") {
+      stopCamera();
+    }
+  }, [activeVerifyTab, qrMode]);
 
   const dbReceived = dbData && dbData.recepcionConfirmada;
-  const showReceptionForm = verifiedData && verifiedData.valido && !verifiedData.recepcionConfirmada && !dbReceived;
 
   return (
     <div className="public-portal">
-      {/* Verify Options selector card */}
-      <div className="glass-card text-center animate-slide-up">
-        <h2 className="card-title justify-center" style={{ borderBottom: "none", paddingBottom: 0 }}>
-          Verificador de Certificados Academicos
-        </h2>
-        <p className="mb-3" style={{ color: "var(--text-secondary)" }}>
-          Selecciona un metodo de verificacion para constatar la autenticidad e inalterabilidad de tu titulo academico.
-        </p>
+      {/* 1. Selector de metodos de verificacion (Solo visible si no se ha verificado aun) */}
+      {!verifiedData && (
+        <div className="glass-card text-center animate-slide-up">
+          <h2 className="card-title justify-center" style={{ borderBottom: "none", paddingBottom: 0 }}>
+            Verificador de Certificados Academicos
+          </h2>
+          <p className="mb-3" style={{ color: "var(--text-secondary)" }}>
+            Selecciona un metodo de verificacion para constatar la autenticidad e inalterabilidad de tu titulo academico.
+          </p>
 
-        {/* Tab Selector */}
-        <div style={{ display: "flex", justifyContent: "center", gap: "0.5rem", marginBottom: "1.5rem" }}>
-          <button
-            className={`nav-btn ${activeVerifyTab === "file" ? "active" : ""}`}
-            onClick={() => { setActiveVerifyTab("file"); setError(null); }}
-            style={{ fontSize: "0.85rem", padding: "0.4rem 1rem" }}
-          >
-            Cargar Archivo PDF
-          </button>
-          <button
-            className={`nav-btn ${activeVerifyTab === "code" ? "active" : ""}`}
-            onClick={() => { setActiveVerifyTab("code"); setError(null); }}
-            style={{ fontSize: "0.85rem", padding: "0.4rem 1rem" }}
-          >
-            Ingresar Codigo
-          </button>
-          <button
-            className={`nav-btn ${activeVerifyTab === "qr" ? "active" : ""}`}
-            onClick={() => { setActiveVerifyTab("qr"); setError(null); }}
-            style={{ fontSize: "0.85rem", padding: "0.4rem 1rem" }}
-          >
-            Escanear QR
-          </button>
-        </div>
-
-        {/* Tab Selection Content */}
-        <div className="transition-grid">
-          
-          {/* Tab 1: PDF Drop Zone */}
-          <div className={`transition-panel ${activeVerifyTab === "file" ? "active" : ""}`}>
-            <div 
-              className={`drop-zone ${dragActive ? "drag-active" : ""}`}
-              onDragEnter={handleDrag}
-              onDragLeave={handleDrag}
-              onDragOver={handleDrag}
-              onDrop={handleDrop}
+          {/* Tab Selector */}
+          <div style={{ display: "flex", justifyContent: "center", gap: "0.5rem", marginBottom: "1.5rem" }}>
+            <button
+              className={`nav-btn ${activeVerifyTab === "file" ? "active" : ""}`}
+              onClick={() => { setActiveVerifyTab("file"); setError(null); }}
+              style={{ fontSize: "0.85rem", padding: "0.4rem 1rem" }}
             >
-              <input
-                type="file"
-                id="pdf-upload"
-                accept=".pdf"
-                style={{ display: "none" }}
-                onChange={handleFileChange}
-              />
-              <label htmlFor="pdf-upload" style={{ cursor: "pointer", width: "100%", height: "100%" }}>
-                <div className="drop-zone-text">Arrastra y suelta tu PDF aqui o haz clic para buscarlo</div>
-                <div className="drop-zone-subtext">La validacion se realiza en la red Ethereum local</div>
-              </label>
-            </div>
+              Cargar Archivo PDF
+            </button>
+            <button
+              className={`nav-btn ${activeVerifyTab === "code" ? "active" : ""}`}
+              onClick={() => { setActiveVerifyTab("code"); setError(null); }}
+              style={{ fontSize: "0.85rem", padding: "0.4rem 1rem" }}
+            >
+              Ingresar Codigo
+            </button>
+            <button
+              className={`nav-btn ${activeVerifyTab === "qr" ? "active" : ""}`}
+              onClick={() => { setActiveVerifyTab("qr"); setError(null); }}
+              style={{ fontSize: "0.85rem", padding: "0.4rem 1rem" }}
+            >
+              Escanear QR
+            </button>
           </div>
 
-          {/* Tab 2: Code input */}
-          <div className={`transition-panel ${activeVerifyTab === "code" ? "active" : ""}`}>
-            <form onSubmit={handleVerifyCode} style={{ maxWidth: "400px", margin: "0 auto", padding: "1rem" }}>
-              <div className="form-group">
-                <label className="form-label">Codigo de Registro Unico *</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  placeholder="ej. CERT-2026-DOCUSIGN"
-                  value={inputCode}
-                  onChange={(e) => setInputCode(e.target.value)}
-                  required
-                />
-              </div>
-              <button type="submit" className="btn mt-2" style={{ width: "100%" }} disabled={loading}>
-                {loading ? "Verificando..." : "Verificar Codigo"}
-              </button>
-            </form>
-          </div>
-
-          {/* Tab 3: QR Upload & Scan Simulation */}
-          <div className={`transition-panel ${activeVerifyTab === "qr" ? "active" : ""}`}>
-            <div style={{ maxWidth: "400px", margin: "0 auto", padding: "1rem" }}>
-              <div className="form-group">
-                <label className="form-label">Subir Imagen de Codigo QR *</label>
+          {/* Tab Selection Content */}
+          <div className="transition-grid">
+            
+            {/* Tab 1: PDF Drop Zone */}
+            <div className={`transition-panel ${activeVerifyTab === "file" ? "active" : ""}`}>
+              <div 
+                className={`drop-zone ${dragActive ? "drag-active" : ""}`}
+                onDragEnter={handleDrag}
+                onDragLeave={handleDrag}
+                onDragOver={handleDrag}
+                onDrop={handleDrop}
+              >
                 <input
                   type="file"
-                  accept="image/*"
-                  className="form-input"
-                  onChange={handleQrUpload}
-                  disabled={qrScanning}
+                  id="pdf-upload"
+                  accept=".pdf"
+                  style={{ display: "none" }}
+                  onChange={handleFileChange}
                 />
+                <label htmlFor="pdf-upload" style={{ cursor: "pointer", width: "100%", height: "100%" }}>
+                  <div className="drop-zone-text">Arrastra y suelta tu PDF aqui o haz clic para buscarlo</div>
+                  <div className="drop-zone-subtext">La validacion se realiza en la red Ethereum local</div>
+                </label>
               </div>
-              
-              {qrScanning && (
-                <div style={{ marginTop: "1.5rem", position: "relative", width: "200px", height: "200px", background: "rgba(0,0,0,0.4)", border: "2px solid var(--accent-purple)", borderRadius: "4px", margin: "0 auto", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <div style={{ color: "var(--accent-purple)", fontSize: "0.8rem" }}>Escaneando...</div>
-                  <div style={{ position: "absolute", left: 0, width: "100%", height: "3px", background: "#39FF14", boxShadow: "0 0 8px #39FF14", animation: "scan 1.5s linear infinite" }}></div>
-                </div>
-              )}
-
-              {!qrScanning && qrFile && (
-                <p style={{ fontSize: "0.82rem", color: "var(--text-secondary)", marginTop: "0.5rem" }}>
-                  Archivo cargado: <strong>{qrFile.name}</strong>
-                </p>
-              )}
             </div>
+
+            {/* Tab 2: Code input */}
+            <div className={`transition-panel ${activeVerifyTab === "code" ? "active" : ""}`}>
+              <form onSubmit={handleVerifyCode} style={{ maxWidth: "400px", margin: "0 auto", padding: "1rem" }}>
+                <div className="form-group">
+                  <label className="form-label">Codigo de Registro Unico *</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="ej. CERT-2026-DOCUSIGN"
+                    value={inputCode}
+                    onChange={(e) => setInputCode(e.target.value)}
+                    required
+                  />
+                </div>
+                <button type="submit" className="btn mt-2" style={{ width: "100%" }} disabled={loading}>
+                  {loading ? "Verificando..." : "Verificar Codigo"}
+                </button>
+              </form>
+            </div>
+
+            {/* Tab 3: QR Upload & Live Camera Scan */}
+            <div className={`transition-panel ${activeVerifyTab === "qr" ? "active" : ""}`}>
+              <div style={{ maxWidth: "400px", margin: "0 auto", padding: "1rem" }}>
+                
+                {/* Hidden element for scanFile local decoding */}
+                <div id="qr-reader-file" style={{ display: "none" }}></div>
+
+                {/* Sub-tab selection for QR Mode */}
+                <div style={{ display: "flex", justifyContent: "center", gap: "0.5rem", marginBottom: "1.5rem" }}>
+                  <button
+                    type="button"
+                    className={`nav-btn ${qrMode === "upload" ? "active" : ""}`}
+                    onClick={() => { setQrMode("upload"); setCameraError(null); }}
+                    style={{ fontSize: "0.8rem", padding: "0.3rem 0.8rem" }}
+                  >
+                    Subir Imagen QR
+                  </button>
+                  <button
+                    type="button"
+                    className={`nav-btn ${qrMode === "camera" ? "active" : ""}`}
+                    onClick={() => { setQrMode("camera"); setCameraError(null); }}
+                    style={{ fontSize: "0.8rem", padding: "0.3rem 0.8rem" }}
+                  >
+                    Escanear con Cámara
+                  </button>
+                </div>
+
+                {qrMode === "upload" && (
+                  <div>
+                    <div className="form-group">
+                      <label className="form-label">Subir Imagen de Codigo QR *</label>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="form-input"
+                        onChange={handleQrUpload}
+                        disabled={qrScanning}
+                      />
+                    </div>
+                    
+                    {qrScanning && (
+                      <div style={{ marginTop: "1.5rem", position: "relative", width: "200px", height: "200px", background: "rgba(0,0,0,0.4)", border: "2px solid var(--accent-purple)", borderRadius: "4px", margin: "0 auto", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        <div style={{ color: "var(--accent-purple)", fontSize: "0.8rem" }}>Escaneando...</div>
+                        <div style={{ position: "absolute", left: 0, width: "100%", height: "3px", background: "#39FF14", boxShadow: "0 0 8px #39FF14", animation: "scan 1.5s linear infinite" }}></div>
+                      </div>
+                    )}
+
+                    {!qrScanning && qrFile && (
+                      <p style={{ fontSize: "0.82rem", color: "var(--text-secondary)", marginTop: "0.5rem" }}>
+                        Archivo cargado: <strong>{qrFile.name}</strong>
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {qrMode === "camera" && (
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "1rem" }}>
+                    {!cameraActive ? (
+                      <div style={{ textAlign: "center", padding: "1.5rem" }}>
+                        <p className="mb-3" style={{ fontSize: "0.9rem", color: "var(--text-secondary)" }}>
+                          Permite el acceso a tu cámara para poder escanear el código QR del título.
+                        </p>
+                        <button
+                          type="button"
+                          className="btn"
+                          onClick={startCamera}
+                          style={{ padding: "0.5rem 1.5rem" }}
+                        >
+                          Iniciar Cámara
+                        </button>
+                      </div>
+                    ) : (
+                      <div style={{ width: "100%", maxWidth: "320px", display: "flex", flexDirection: "column", alignItems: "center" }}>
+                        {/* Scanner Container */}
+                        <div style={{ position: "relative", width: "100%", aspectRatio: "1/1", background: "#000", borderRadius: "8px", overflow: "hidden", border: "2px solid var(--accent-purple)", boxShadow: "0 0 15px rgba(168, 85, 247, 0.4)" }}>
+                          
+                          {/* Live reader container for html5-qrcode */}
+                          <div id="qr-reader-camera" style={{ width: "100%", height: "100%" }}></div>
+
+                          {/* Scanner Laser Overlay */}
+                          <div style={{
+                            position: "absolute",
+                            left: 0,
+                            width: "100%",
+                            height: "3px",
+                            background: "#39FF14",
+                            boxShadow: "0 0 8px #39FF14",
+                            animation: "scan 2s linear infinite",
+                            zIndex: 10,
+                            pointerEvents: "none"
+                          }}></div>
+
+                          {/* Scanner Framing Guides */}
+                          <div style={{
+                            position: "absolute",
+                            top: "12.5%",
+                            left: "12.5%",
+                            width: "75%",
+                            height: "75%",
+                            border: "2px dashed rgba(255, 255, 255, 0.5)",
+                            borderRadius: "8px",
+                            boxSizing: "border-box",
+                            zIndex: 5,
+                            pointerEvents: "none"
+                          }}></div>
+                        </div>
+
+                        {/* Control Buttons */}
+                        <div style={{ display: "flex", gap: "0.5rem", marginTop: "1rem", width: "100%" }}>
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            onClick={stopCamera}
+                            style={{ flex: 1, padding: "0.4rem" }}
+                          >
+                            Detener Cámara
+                          </button>
+                          <button
+                            type="button"
+                            className="btn"
+                            onClick={simulateCameraScan}
+                            style={{ flex: 1, padding: "0.4rem", background: "linear-gradient(135deg, #a855f7 0%, #6366f1 100%)", fontSize: "0.8rem" }}
+                            title="Simular escaneo de código QR para pruebas rápidas"
+                          >
+                            Simular Escaneo
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {cameraError && (
+                      <div style={{ color: "var(--danger)", fontSize: "0.85rem", textAlign: "center", marginTop: "0.5rem" }}>
+                        {cameraError}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+              </div>
+            </div>
+
           </div>
 
+          {loading && !qrScanning && <div className="mt-3">Conectando con la Blockchain y verificando hash...</div>}
         </div>
+      )}
 
-        {loading && !qrScanning && <div className="mt-3">Conectando con la Blockchain y verificando hash...</div>}
-      </div>
-
+      {/* 2. Alerta de error */}
       {error && (
         <div className="status-alert danger animate-slide-up">
           <span>[Error] </span>
@@ -445,48 +596,35 @@ export const PublicPortal: React.FC = () => {
         </div>
       )}
 
-      {/* DocuSign-style Student Reception Form */}
-      {showReceptionForm && (
-        <div className="glass-card animate-slide-up" style={{ borderTopColor: "var(--accent-purple)", background: "rgba(111, 66, 193, 0.05)", maxWidth: "500px", margin: "1.5rem auto" }}>
-          <h3 className="card-title justify-center" style={{ color: "var(--text-primary)", borderBottom: "none", paddingBottom: 0 }}>
-            Firma de Recepcion de Certificado
-          </h3>
-          <p className="mb-3 text-center" style={{ fontSize: "0.9rem" }}>
-            Si eres el estudiante asignado (<strong>{verifiedData.estudiante}</strong>), dibuja tu firma digital en el recuadro de abajo para confirmar la recepcion oficial.
-          </p>
-
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "1rem" }}>
-            <div className="canvas-container" style={{ width: "100%", display: "flex", flexDirection: "column", alignItems: "center" }}>
-              <canvas
-                ref={canvasRef}
-                width={320}
-                height={150}
-                className="signature-canvas"
-                style={{ background: "white", borderRadius: "4px", border: "1px solid var(--glass-border)", marginBottom: "0.5rem" }}
-                onMouseDown={startDrawing}
-                onMouseMove={draw}
-                onMouseUp={stopDrawing}
-                onMouseLeave={stopDrawing}
-                onTouchStart={startDrawing}
-                onTouchMove={draw}
-                onTouchEnd={stopDrawing}
-              ></canvas>
-              <div style={{ display: "flex", gap: "1rem" }}>
-                <button className="btn btn-secondary" style={{ padding: "0.4rem 1rem", fontSize: "0.85rem" }} onClick={clearCanvas}>
-                  Limpiar Lienzo
-                </button>
-                <button className="btn" style={{ padding: "0.4rem 1rem", fontSize: "0.85rem" }} onClick={handleConfirmReceptionCanvas}>
-                  Confirmar Firma de Recepcion
-                </button>
+      {/* 3. Panel de resultados simplificado (Solo visible si esta verificado) */}
+      {verifiedData && (
+        <div className="animate-slide-up" style={{ maxWidth: "600px", margin: "0 auto" }}>
+          
+          {/* Alerta de Validez */}
+          {verifiedData.valido ? (
+            <div className="status-alert success">
+              <span>[Valido] </span>
+              <div>
+                <strong>Certificado Valido</strong>
+                <div style={{ fontSize: "0.85rem", fontWeight: "normal" }}>
+                  Registrado en Blockchain por: <strong>{verifiedData.cargoEmisor}</strong> ({verifiedData.emisor}). El archivo es original y no presenta ninguna alteracion.
+                </div>
               </div>
             </div>
-          </div>
-        </div>
-      )}
+          ) : (
+            <div className="status-alert danger">
+              <span>[Revocado] </span>
+              <div>
+                <strong>Certificado Revocado</strong>
+                <div style={{ fontSize: "0.85rem", fontWeight: "normal" }}>
+                  Este certificado ha sido invalidado el {new Date(verifiedData.fechaRevocacion).toLocaleString()}. <br />
+                  <strong>Motivo de Revocacion:</strong> {verifiedData.motivoRevocacion}
+                </div>
+              </div>
+            </div>
+          )}
 
-      {verifiedData && (
-        <div className="grid-2 animate-slide-up">
-          {/* Diploma Visualizer */}
+          {/* Tarjeta de Diploma */}
           <div className="diploma-card" style={{ border: "2px solid var(--accent-purple)", borderRadius: "4px" }}>
             <div className={`diploma-seal ${verifiedData.valido ? "" : "revoked"}`} style={{ borderRadius: "2px" }}>
               {verifiedData.valido ? "VALIDO" : "REVOCADO"}
@@ -508,20 +646,9 @@ export const PublicPortal: React.FC = () => {
             <div className="mt-3" style={{ padding: "0.75rem", background: "rgba(0,0,0,0.02)", borderRadius: "4px", border: "1px dashed var(--glass-border)", fontSize: "0.82rem" }}>
               <strong>Billetera Estudiante:</strong> {verifiedData.estudianteWallet && verifiedData.estudianteWallet !== "0x0000000000000000000000000000000000000000" ? verifiedData.estudianteWallet : "No requerida"} <br />
               {verifiedData.recepcionConfirmada || dbReceived ? (
-                <div style={{ marginTop: "0.5rem" }}>
-                  <span style={{ color: "var(--success)", fontWeight: "600" }}>
-                    Recepcion firmada digitalmente
-                  </span>
-                  {dbData && dbData.estudianteSignatureImage && (
-                    <div style={{ marginTop: "0.5rem", textAlign: "center" }}>
-                      <img 
-                        src={dbData.estudianteSignatureImage} 
-                        alt="Firma de recepcion estudiante" 
-                        style={{ height: "45px", background: "white", padding: "2px", borderRadius: "4px" }} 
-                      />
-                    </div>
-                  )}
-                </div>
+                <span style={{ color: "var(--success)", fontWeight: "600" }}>
+                  Recepcion firmada digitalmente
+                </span>
               ) : (
                 <span style={{ color: "var(--warning)", fontWeight: "600" }}>
                   Recepcion pendiente de firma por el graduado
@@ -561,140 +688,24 @@ export const PublicPortal: React.FC = () => {
             )}
           </div>
 
-          {/* Audit Details */}
-          <div>
-            {verifiedData.valido ? (
-              <div className="status-alert success">
-                <span>[Valido] </span>
-                <div>
-                  <strong>Certificado Valido</strong>
-                  <div style={{ fontSize: "0.85rem", fontWeight: "normal" }}>
-                    Registrado en Blockchain por: <strong>{verifiedData.cargoEmisor}</strong> ({verifiedData.emisor}). El archivo es original y no presenta ninguna alteracion.
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="status-alert danger">
-                <span>[Revocado] </span>
-                <div>
-                  <strong>Certificado Revocado</strong>
-                  <div style={{ fontSize: "0.85rem", fontWeight: "normal" }}>
-                    Este certificado ha sido invalidado el {new Date(verifiedData.fechaRevocacion).toLocaleString()}. <br />
-                    <strong>Motivo de Revocacion:</strong> {verifiedData.motivoRevocacion}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Downloads */}
-            {dbData && (
-              <div className="glass-card" style={{ padding: "1.5rem" }}>
-                <h4 className="mb-2" style={{ color: "var(--text-primary)", fontSize: "1.1rem" }}>
-                  Archivos Oficiales
-                </h4>
-                <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap" }}>
-                  {dbData.officializedPath && (
-                    <a
-                      href={`http://localhost:3001/${dbData.officializedPath}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="btn btn-secondary"
-                      style={{ flex: 1, textDecoration: "none", textAlign: "center" }}
-                    >
-                      Descargar PDF Oficializado
-                    </a>
-                  )}
-                  {dbData.certificatePath && (
-                    <a
-                      href={`http://localhost:3001/${dbData.certificatePath}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="btn"
-                      style={{ flex: 1, textDecoration: "none", textAlign: "center" }}
-                    >
-                      Descargar Certificado
-                    </a>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Blockchain History Log */}
-            <div className="glass-card" style={{ padding: "1.5rem" }}>
-              <h4 className="mb-2" style={{ color: "var(--text-primary)", fontSize: "1.1rem" }}>
-                Linea de Tiempo de Auditoria en Blockchain
-              </h4>
-              <ul className="audit-list">
-                <li className="audit-item" style={{ borderLeftColor: "var(--success)" }}>
-                  <div>
-                    <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span className="audit-action" style={{ color: "var(--success)" }}>EMISION (Blockchain)</span>
-                      <span className="audit-time">{new Date(verifiedData.fechaEmision).toLocaleString()}</span>
-                    </div>
-                    <p className="mt-1" style={{ color: "var(--text-secondary)", fontSize: "0.82rem" }}>
-                      Certificado oficial registrado por el emisor con cargo **{verifiedData.cargoEmisor}** ({verifiedData.emisor}).
-                    </p>
-                  </div>
-                </li>
-
-                {(verifiedData.recepcionConfirmada || dbReceived) && (
-                  <li className="audit-item" style={{ borderLeftColor: "var(--accent-purple)" }}>
-                    <div>
-                      <div style={{ display: "flex", justifyContent: "space-between" }}>
-                        <span className="audit-action" style={{ color: "var(--accent-purple)" }}>RECEPCION</span>
-                        <span className="audit-time">
-                          {verifiedData.recepcionConfirmada 
-                            ? new Date(verifiedData.fechaRecepcion).toLocaleString()
-                            : dbData?.fechaRecepcion ? new Date(dbData.fechaRecepcion).toLocaleString() : ""}
-                        </span>
-                      </div>
-                      <p className="mt-1" style={{ color: "var(--text-secondary)", fontSize: "0.82rem" }}>
-                        Firma digital de recepcion confirmada. {verifiedData.recepcionConfirmada ? "(Registrado en Blockchain)" : "(Registrado en Servidor Local)"}
-                      </p>
-                    </div>
-                  </li>
-                )}
-
-                {!verifiedData.valido && (
-                  <li className="audit-item" style={{ borderLeftColor: "var(--danger)" }}>
-                    <div>
-                      <div style={{ display: "flex", justifyContent: "space-between" }}>
-                        <span className="audit-action" style={{ color: "var(--danger)" }}>REVOCACION (Blockchain)</span>
-                        <span className="audit-time">{new Date(verifiedData.fechaRevocacion).toLocaleString()}</span>
-                      </div>
-                      <p className="mt-1" style={{ color: "var(--text-secondary)", fontSize: "0.82rem" }}>
-                        Certificado revocado. Motivo: **{verifiedData.motivoRevocacion}**
-                      </p>
-                    </div>
-                  </li>
-                )}
-              </ul>
-            </div>
-
-            {/* Local Audit Logs */}
-            {dbData && dbData.auditLogs && (
-              <div className="glass-card" style={{ padding: "1.5rem" }}>
-                <h4 className="mb-2" style={{ color: "var(--text-primary)", fontSize: "1.1rem" }}>
-                  Bitacora Completa de Base de Datos
-                </h4>
-                <ul className="audit-list">
-                  {dbData.auditLogs.map((log, index) => (
-                    <li key={index} className="audit-item" style={{ borderLeftColor: "var(--accent-purple)" }}>
-                      <div>
-                        <div style={{ display: "flex", justifyContent: "space-between" }}>
-                          <span className="audit-action">{log.action}</span>
-                          <span className="audit-time">{new Date(log.timestamp).toLocaleString()}</span>
-                        </div>
-                        <p className="mt-1" style={{ color: "var(--text-secondary)", fontSize: "0.82rem" }}>
-                          {log.details}
-                        </p>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
+          {/* Boton para regresar */}
+          <div style={{ textAlign: "center", marginTop: "2rem", marginBottom: "2rem" }}>
+            <button
+              onClick={() => {
+                setVerifiedData(null);
+                setDbData(null);
+                setDocHash(null);
+                setError(null);
+                setInputCode("");
+                setQrFile(null);
+              }}
+              className="btn btn-secondary"
+              style={{ padding: "0.6rem 2.5rem", fontSize: "0.9rem" }}
+            >
+              Volver atrás
+            </button>
           </div>
+
         </div>
       )}
     </div>

@@ -56,3 +56,9 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+
+# --- WhatsApp Web Sessions & Caches ---
+backend/whatsapp-session/
+**/whatsapp-session/
+backend/.wwebjs_cache/
+**/.wwebjs_cache/

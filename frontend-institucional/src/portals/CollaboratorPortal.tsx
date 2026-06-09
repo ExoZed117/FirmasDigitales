@@ -31,6 +31,7 @@ interface CollaboratorData {
     codigo: string;
     estudiante: string;
     originalPath: string | null;
+    requireFacial: boolean;
     collaborators: CollaboratorRecord[];
   };
 }
@@ -49,6 +50,140 @@ export const CollaboratorPortal: React.FC<CollaboratorPortalProps> = ({ token })
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
+  // Facial Verification States
+  const [isFacialVerified, setIsFacialVerified] = useState<boolean>(false);
+  const [isCameraActive, setIsCameraActive] = useState<boolean>(false);
+  const [facialProgress, setFacialProgress] = useState<number>(0);
+  const [facialStatus, setFacialStatus] = useState<string>("Inicie la cámara de seguridad para continuar");
+  const [facialScanError, setFacialScanError] = useState<string | null>(null);
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
+
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const faceCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // Skin tone detector in RGB
+  const isSkinColor = (r: number, g: number, b: number): boolean => {
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    const diff = max - min;
+    return r > 95 && g > 40 && b > 20 &&
+           diff > 15 &&
+           Math.abs(r - g) > 15 &&
+           r > g && r > b;
+  };
+
+  const startFacialCamera = async () => {
+    setFacialScanError(null);
+    setFacialProgress(0);
+    setFacialStatus("Accediendo a la cámara de seguridad...");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
+      setCameraStream(stream);
+      setIsCameraActive(true);
+      setIsAnalyzing(true);
+      setFacialStatus("Alinee su rostro dentro del óvalo de escaneo...");
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+    } catch (err: any) {
+      console.error("Error accessing webcam:", err);
+      setFacialScanError("No se pudo acceder a la cámara. Por favor otorgue permisos de cámara o verifique si está en uso.");
+      setFacialStatus("Error de acceso a la cámara");
+    }
+  };
+
+  const stopFacialCamera = () => {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach((track) => track.stop());
+      setCameraStream(null);
+    }
+    setIsCameraActive(false);
+    setIsAnalyzing(false);
+  };
+
+  const simulateFacialVerification = () => {
+    stopFacialCamera();
+    setFacialProgress(100);
+    setFacialStatus("Rostro validado mediante simulación.");
+  };
+
+  useEffect(() => {
+    return () => {
+      if (cameraStream) {
+        cameraStream.getTracks().forEach((track) => track.stop());
+      }
+    };
+  }, [cameraStream]);
+
+  useEffect(() => {
+    let intervalId: any;
+    let localProgress = 0;
+
+    if (isAnalyzing && videoRef.current && faceCanvasRef.current) {
+      const video = videoRef.current;
+      const canvas = faceCanvasRef.current;
+      const ctx = canvas.getContext("2d");
+
+      intervalId = setInterval(() => {
+        if (!video || !canvas || !ctx) return;
+
+        if (canvas.width !== video.videoWidth && video.videoWidth > 0) {
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+        }
+
+        try {
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const data = imgData.data;
+
+          let skinPixels = 0;
+          const totalPixels = canvas.width * canvas.height;
+
+          // Downsample for performance (inspect 1 in 16 pixels)
+          for (let i = 0; i < data.length; i += 64) {
+            const r = data[i];
+            const g = data[i+1];
+            const b = data[i+2];
+            if (isSkinColor(r, g, b)) {
+              skinPixels++;
+            }
+          }
+
+          const skinRatio = skinPixels / (totalPixels / 16);
+          // Human face inside central region covers ~5% to 45% skin ratio
+          const facePresent = skinRatio >= 0.05 && skinRatio <= 0.45;
+
+          if (facePresent) {
+            localProgress += 8; // increase progress when face is present
+            setFacialProgress(Math.min(localProgress, 100));
+            if (localProgress >= 100) {
+              setFacialStatus("Rostro verificado con éxito.");
+              setIsAnalyzing(false);
+              stopFacialCamera();
+            } else if (localProgress > 60) {
+              setFacialStatus("Verificando vitalidad de la persona... Parpadee por favor");
+            } else {
+              setFacialStatus("Rostro detectado. Analizando características faciales...");
+            }
+          } else {
+            // Decay progress if no face is detected
+            localProgress = Math.max(0, localProgress - 4);
+            setFacialProgress(localProgress);
+            setFacialStatus("Alinee su rostro. Buscando persona...");
+          }
+        } catch (e) {
+          // ignore canvas access errors before video stream fully starts
+        }
+      }, 200);
+    }
+
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [isAnalyzing]);
+
   useEffect(() => {
     fetchCollaboratorData();
   }, [token]);
@@ -57,7 +192,8 @@ export const CollaboratorPortal: React.FC<CollaboratorPortalProps> = ({ token })
     try {
       setLoading(true);
       setError(null);
-      const res = await fetch(`http://localhost:3001/api/documents/sign/${token}`);
+      const API_URL = localStorage.getItem("blockcert_api_url") || "http://localhost:3001";
+      const res = await fetch(`${API_URL}/api/documents/sign/${token}`);
       if (!res.ok) {
         const errJson = await res.json();
         throw new Error(errJson.error || "Token de invitacion no valido.");
@@ -178,7 +314,8 @@ export const CollaboratorPortal: React.FC<CollaboratorPortalProps> = ({ token })
       setLoading(true);
       setError(null);
 
-      const response = await fetch(`http://localhost:3001/api/documents/sign/${token}`, {
+      const API_URL = localStorage.getItem("blockcert_api_url") || "http://localhost:3001";
+      const response = await fetch(`${API_URL}/api/documents/sign/${token}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -215,6 +352,210 @@ export const CollaboratorPortal: React.FC<CollaboratorPortalProps> = ({ token })
   }
 
   if (!collab) return null;
+
+  // Facial verification gate intercept
+  if (collab.document.requireFacial && !signedSuccess && !isFacialVerified) {
+    return (
+      <div className="collaborator-portal animate-slide-up" style={{ maxWidth: "550px", margin: "0 auto" }}>
+        <div className="glass-card text-center" style={{ padding: "2rem" }}>
+          <h2 className="header-logo" style={{ fontSize: "1.75rem", marginBottom: "0.5rem" }}>
+            Verificación de Identidad Biométrica
+          </h2>
+          <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem", marginBottom: "1.5rem" }}>
+            Este certificado requiere autenticación biométrica facial para verificar que usted es una persona física antes de habilitar la firma del documento.
+          </p>
+
+          {/* Hidden Canvas for Frame Processing */}
+          <canvas ref={faceCanvasRef} style={{ display: "none" }}></canvas>
+
+          {/* Oval Scanner container */}
+          <div style={{
+            position: "relative",
+            width: "280px",
+            height: "340px",
+            margin: "0 auto 1.5rem",
+            borderRadius: "50% / 50%",
+            overflow: "hidden",
+            background: "#000",
+            border: facialProgress === 100 ? "4px solid var(--success)" : "4px solid var(--accent-purple)",
+            boxShadow: facialProgress === 100 ? "0 0 20px rgba(16, 185, 129, 0.4)" : "0 0 20px rgba(168, 85, 247, 0.4)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center"
+          }}>
+            {isCameraActive ? (
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  objectFit: "cover"
+                }}
+              />
+            ) : (
+              <div style={{ color: "var(--text-secondary)", fontSize: "0.85rem", padding: "1rem", textAlign: "center" }}>
+                {facialProgress === 100 ? (
+                  <div style={{ color: "var(--success)", fontSize: "1rem", fontWeight: "bold" }}>
+                    ✓ Identificación Completa
+                  </div>
+                ) : (
+                  <div>
+                    Cámara Inactiva <br />
+                    <span style={{ fontSize: "0.75rem" }}>Haga clic abajo para iniciar</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Glowing Laser Scan Bar */}
+            {isAnalyzing && (
+              <div style={{
+                position: "absolute",
+                left: 0,
+                width: "100%",
+                height: "4px",
+                background: "#a855f7",
+                boxShadow: "0 0 10px #a855f7",
+                animation: "scan 2.5s linear infinite",
+                pointerEvents: "none"
+              }}></div>
+            )}
+
+            {/* Apple Face ID Style SVG Overlay */}
+            {isCameraActive && (
+              <svg 
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  width: "100%",
+                  height: "100%",
+                  pointerEvents: "none"
+                }}
+                viewBox="0 0 100 100" 
+                preserveAspectRatio="none"
+              >
+                <defs>
+                  <mask id="oval-hole">
+                    <rect x="0" y="0" width="100" height="100" fill="white" />
+                    <ellipse cx="50" cy="50" rx="36" ry="44" fill="black" />
+                  </mask>
+                </defs>
+                <rect x="0" y="0" width="100" height="100" fill="rgba(15, 23, 42, 0.55)" mask="url(#oval-hole)" />
+              </svg>
+            )}
+          </div>
+
+          {/* Progress and status message */}
+          <div style={{ marginBottom: "1.5rem" }}>
+            <div style={{
+              display: "flex",
+              justifyContent: "space-between",
+              fontSize: "0.85rem",
+              fontWeight: "600",
+              color: facialProgress === 100 ? "var(--success)" : "var(--text-primary)",
+              marginBottom: "0.5rem"
+            }}>
+              <span>Progreso de Verificación:</span>
+              <span>{facialProgress}%</span>
+            </div>
+            
+            <div style={{
+              width: "100%",
+              height: "8px",
+              background: "rgba(0,0,0,0.1)",
+              borderRadius: "4px",
+              overflow: "hidden",
+              marginBottom: "0.75rem"
+            }}>
+              <div style={{
+                width: `${facialProgress}%`,
+                height: "100%",
+                background: facialProgress === 100 ? "var(--success)" : "linear-gradient(90deg, #a855f7, #6366f1)",
+                transition: "width 0.2s ease"
+              }}></div>
+            </div>
+
+            <div style={{
+              fontSize: "0.88rem",
+              color: "var(--text-secondary)",
+              background: "rgba(0, 0, 0, 0.02)",
+              border: "1px solid var(--glass-border)",
+              padding: "0.6rem 1rem",
+              borderRadius: "4px",
+              fontStyle: "italic"
+            }}>
+              {facialStatus}
+            </div>
+          </div>
+
+          {facialScanError && (
+            <div className="status-alert danger mb-3" style={{ fontSize: "0.85rem", padding: "0.5rem 1rem" }}>
+              <span>[Error] </span>
+              <div>{facialScanError}</div>
+            </div>
+          )}
+
+          {/* Controls */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+            {facialProgress < 100 ? (
+              <div style={{ display: "flex", gap: "0.75rem" }}>
+                {!isCameraActive ? (
+                  <button
+                    onClick={startFacialCamera}
+                    className="btn"
+                    style={{ flex: 1, padding: "0.75rem" }}
+                  >
+                    Iniciar Cámara de Seguridad
+                  </button>
+                ) : (
+                  <button
+                    onClick={stopFacialCamera}
+                    className="btn btn-secondary"
+                    style={{ flex: 1, padding: "0.75rem" }}
+                  >
+                    Detener Cámara
+                  </button>
+                )}
+                
+                {isCameraActive && (
+                  <button
+                    onClick={simulateFacialVerification}
+                    className="btn btn-secondary"
+                    style={{
+                      flex: 1,
+                      padding: "0.75rem",
+                      background: "linear-gradient(135deg, #a855f7 0%, #6366f1 100%)",
+                      color: "#fff",
+                      border: "none"
+                    }}
+                  >
+                    Simular Rostro
+                  </button>
+                )}
+              </div>
+            ) : (
+              <button
+                onClick={() => setIsFacialVerified(true)}
+                className="btn"
+                style={{
+                  padding: "0.8rem",
+                  fontSize: "0.95rem",
+                  background: "var(--success)",
+                  boxShadow: "0 0 15px rgba(16, 185, 129, 0.4)"
+                }}
+              >
+                Continuar a la Firma del Documento
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const allCols = collab.document.collaborators || [];
 

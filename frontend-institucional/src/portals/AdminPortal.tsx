@@ -72,7 +72,7 @@ export const AdminPortal: React.FC = () => {
   const [fileWarning, setFileWarning] = useState<string | null>(null);
   
   // Verification Options
-  const [optVerification, setOptVerification] = useState(false);
+  const [optVerification, setOptVerification] = useState(true);
   const [facialVerification, setFacialVerification] = useState(false);
   const [signatureVerification, setSignatureVerification] = useState(true);
 
@@ -96,6 +96,13 @@ export const AdminPortal: React.FC = () => {
 
   useEffect(() => {
     fetchDocuments();
+
+    // Auto-actualizar historial en segundo plano cada 5 segundos
+    const interval = setInterval(() => {
+      fetchDocuments(true);
+    }, 5000);
+
+    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -145,10 +152,11 @@ export const AdminPortal: React.FC = () => {
     };
   }, [draggingIndex, dragStart, boxStart, collaborators]);
 
-  const fetchDocuments = async () => {
+  const fetchDocuments = async (silent = false) => {
     try {
-      setLoading(true);
-      const res = await fetch("http://localhost:3001/api/documents/admin");
+      if (!silent) setLoading(true);
+      const API_URL = localStorage.getItem("blockcert_api_url") || "http://localhost:3001";
+      const res = await fetch(`${API_URL}/api/documents/admin`);
       if (res.ok) {
         const data = await res.json();
         setDocuments(data);
@@ -156,7 +164,7 @@ export const AdminPortal: React.FC = () => {
     } catch (err: any) {
       console.error("Error loading documents:", err);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -309,9 +317,11 @@ export const AdminPortal: React.FC = () => {
     formData.append("estudiante", estudiante);
     formData.append("estudianteWallet", "0x0000000000000000000000000000000000000000");
     formData.append("collaboratorsJson", JSON.stringify(convertedCollaborators));
+    formData.append("requireFacial", facialVerification ? "true" : "false");
 
     try {
-      const res = await fetch("http://localhost:3001/api/documents", {
+      const API_URL = localStorage.getItem("blockcert_api_url") || "http://localhost:3001";
+      const res = await fetch(`${API_URL}/api/documents`, {
         method: "POST",
         body: formData,
       });
@@ -392,7 +402,8 @@ export const AdminPortal: React.FC = () => {
       setSubmitLoading(true);
       setError(null);
 
-      const response = await fetch(`http://localhost:3001/api/documents/register/${doc.id}`, {
+      const API_URL = localStorage.getItem("blockcert_api_url") || "http://localhost:3001";
+      const response = await fetch(`${API_URL}/api/documents/register/${doc.id}`, {
         method: "POST",
       });
 
@@ -422,7 +433,8 @@ export const AdminPortal: React.FC = () => {
       setSubmitLoading(true);
       setError(null);
 
-      const response = await fetch(`http://localhost:3001/api/documents/revoke/${doc.hashDocumento}`, {
+      const API_URL = localStorage.getItem("blockcert_api_url") || "http://localhost:3001";
+      const response = await fetch(`${API_URL}/api/documents/revoke/${doc.hashDocumento}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ motivo }),
@@ -564,7 +576,7 @@ export const AdminPortal: React.FC = () => {
                               checked={optVerification}
                               onChange={(e) => setOptVerification(e.target.checked)}
                             />
-                            Codigo OTP (SMS o Email)
+                            Codigo OTP (Correo y WhatsApp)
                           </label>
                           <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.9rem", cursor: "pointer" }}>
                             <input
