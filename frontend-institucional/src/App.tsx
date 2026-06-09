@@ -122,6 +122,24 @@ const MainApp: React.FC = () => {
 
   // Simple routing detection on load
   useEffect(() => {
+    // 0. Check for apiUrl parameter to dynamically configure backend connection
+    const params = new URLSearchParams(window.location.search);
+    const apiUrlParam = params.get("apiUrl");
+    if (apiUrlParam) {
+      let formattedUrl = apiUrlParam.trim();
+      if (formattedUrl.endsWith("/")) {
+        formattedUrl = formattedUrl.slice(0, -1);
+      }
+      localStorage.setItem("blockcert_api_url", formattedUrl);
+      
+      params.delete("apiUrl");
+      const newSearch = params.toString();
+      const newUrl = window.location.pathname + (newSearch ? `?${newSearch}` : "") + window.location.hash;
+      window.history.replaceState({}, "", newUrl);
+      window.location.reload();
+      return;
+    }
+
     // 1. Check path routing: e.g. /sign/TOKEN
     const path = window.location.pathname;
     if (path.startsWith("/sign/")) {

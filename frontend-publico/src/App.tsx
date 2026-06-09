@@ -99,6 +99,24 @@ const ApiConfigWidget: React.FC = () => {
 };
 
 const App: React.FC = () => {
+  React.useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const apiUrlParam = params.get("apiUrl");
+    if (apiUrlParam) {
+      let formattedUrl = apiUrlParam.trim();
+      if (formattedUrl.endsWith("/")) {
+        formattedUrl = formattedUrl.slice(0, -1);
+      }
+      localStorage.setItem("blockcert_api_url", formattedUrl);
+      
+      params.delete("apiUrl");
+      const newSearch = params.toString();
+      const newUrl = window.location.pathname + (newSearch ? `?${newSearch}` : "") + window.location.hash;
+      window.history.replaceState({}, "", newUrl);
+      window.location.reload();
+    }
+  }, []);
+
   return (
     <div className="app-container">
       {/* Premium Header */}

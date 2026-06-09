@@ -50,7 +50,8 @@ export class NotificationService {
    */
   static async sendEmail(payload: NotificationPayload): Promise<boolean> {
     const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
-    const urlFirma = `${frontendUrl}/sign/${payload.token}`;
+    const backendUrl = process.env.BACKEND_URL || "http://localhost:3001";
+    const urlFirma = `${frontendUrl}/sign/${payload.token}?apiUrl=${backendUrl}`;
     
     try {
       await transporter.sendMail({
@@ -92,7 +93,8 @@ export class NotificationService {
 
     try {
       const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
-      const urlFirma = `${frontendUrl}/sign/${payload.token}`;
+      const backendUrl = process.env.BACKEND_URL || "http://localhost:3001";
+      const urlFirma = `${frontendUrl}/sign/${payload.token}?apiUrl=${backendUrl}`;
       let cleanPhone = payload.toPhone.replace(/\D/g, "");
       
       // Auto-completar prefijo de Bolivia (591) si tiene 8 dígitos

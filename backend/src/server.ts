@@ -213,7 +213,9 @@ async function generateCertificatePdf(doc: Document, finalHash: string, allCols:
 
   // Generate QR Code referencing the verification portal (running on port 5174)
   try {
-    const verificationUrl = `http://localhost:5174/?code=${doc.codigo}`;
+    const frontendPublicUrl = process.env.FRONTEND_PUBLIC_URL || "http://localhost:5174";
+    const backendUrl = process.env.BACKEND_URL || "http://localhost:3001";
+    const verificationUrl = `${frontendPublicUrl}/?code=${doc.codigo}&apiUrl=${backendUrl}`;
     const qrDataUrl = await QRCode.toDataURL(verificationUrl, { margin: 1, width: 150 });
     const qrBase64 = qrDataUrl.split(",")[1];
     const qrBytes = Buffer.from(qrBase64, "base64");
