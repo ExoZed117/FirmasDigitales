@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Html5Qrcode } from "html5-qrcode";
+import { getApiUrl } from "../context/apiConfig";
 
 interface VerifiedData {
   existe: boolean;
@@ -125,7 +126,7 @@ export const PublicPortal: React.FC = () => {
   };
 
   const verifyHashOnChain = async (hashHex: string) => {
-    const API_URL = localStorage.getItem("blockcert_api_url") || "http://localhost:3001";
+    const API_URL = getApiUrl();
     
     // Llamar al proxy del backend para consultar los datos del contrato en la Blockchain
     const responseBc = await fetch(`${API_URL}/api/blockchain/verify-hash/${hashHex}`);
@@ -159,7 +160,7 @@ export const PublicPortal: React.FC = () => {
     setDocHash(null);
 
     try {
-      const API_URL = localStorage.getItem("blockcert_api_url") || "http://localhost:3001";
+      const API_URL = getApiUrl();
       const responseBc = await fetch(`${API_URL}/api/blockchain/verify-code/${inputCode.trim()}`);
       if (!responseBc.ok) {
         const errJson = await responseBc.json();
@@ -260,7 +261,7 @@ export const PublicPortal: React.FC = () => {
 
       setInputCode(codeToVerify);
 
-      const API_URL = localStorage.getItem("blockcert_api_url") || "http://localhost:3001";
+      const API_URL = getApiUrl();
       const responseBc = await fetch(`${API_URL}/api/blockchain/verify-code/${codeToVerify}`);
       if (!responseBc.ok) {
         const errJson = await responseBc.json();
@@ -302,7 +303,7 @@ export const PublicPortal: React.FC = () => {
 
             setInputCode(codeToVerify);
             
-            const API_URL = localStorage.getItem("blockcert_api_url") || "http://localhost:3001";
+            const API_URL = getApiUrl();
             const responseBc = await fetch(`${API_URL}/api/blockchain/verify-code/${codeToVerify}`);
             if (!responseBc.ok) {
               const errJson = await responseBc.json();

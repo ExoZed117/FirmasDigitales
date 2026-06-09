@@ -3,6 +3,7 @@ import { Web3Provider } from "./context/Web3Context";
 import Login from "./portals/Login";
 import AdminPortal from "./portals/AdminPortal";
 import CollaboratorPortal from "./portals/CollaboratorPortal";
+import { getApiUrl } from "./context/apiConfig";
 
 interface UserSession {
   role: string;
@@ -10,7 +11,7 @@ interface UserSession {
 }
 
 const ApiConfigWidget: React.FC = () => {
-  const currentUrl = localStorage.getItem("blockcert_api_url") || "http://localhost:3001";
+  const currentUrl = getApiUrl();
   const [isOpen, setIsOpen] = useState(false);
   const [inputValue, setInputValue] = useState(currentUrl);
 

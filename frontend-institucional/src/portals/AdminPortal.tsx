@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useWeb3 } from "../context/Web3Context";
+import { getApiUrl } from "../context/apiConfig";
 
 interface CollaboratorInput {
   name: string;
@@ -155,7 +156,7 @@ export const AdminPortal: React.FC = () => {
   const fetchDocuments = async (silent = false) => {
     try {
       if (!silent) setLoading(true);
-      const API_URL = localStorage.getItem("blockcert_api_url") || "http://localhost:3001";
+      const API_URL = getApiUrl();
       const res = await fetch(`${API_URL}/api/documents/admin`);
       if (res.ok) {
         const data = await res.json();
@@ -320,7 +321,7 @@ export const AdminPortal: React.FC = () => {
     formData.append("requireFacial", facialVerification ? "true" : "false");
 
     try {
-      const API_URL = localStorage.getItem("blockcert_api_url") || "http://localhost:3001";
+      const API_URL = getApiUrl();
       const res = await fetch(`${API_URL}/api/documents`, {
         method: "POST",
         body: formData,
@@ -402,7 +403,7 @@ export const AdminPortal: React.FC = () => {
       setSubmitLoading(true);
       setError(null);
 
-      const API_URL = localStorage.getItem("blockcert_api_url") || "http://localhost:3001";
+      const API_URL = getApiUrl();
       const response = await fetch(`${API_URL}/api/documents/register/${doc.id}`, {
         method: "POST",
       });
@@ -433,7 +434,7 @@ export const AdminPortal: React.FC = () => {
       setSubmitLoading(true);
       setError(null);
 
-      const API_URL = localStorage.getItem("blockcert_api_url") || "http://localhost:3001";
+      const API_URL = getApiUrl();
       const response = await fetch(`${API_URL}/api/documents/revoke/${doc.hashDocumento}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

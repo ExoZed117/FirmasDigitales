@@ -1,8 +1,9 @@
 import React, { useState } from "react";
 import PublicPortal from "./portals/PublicPortal";
+import { getApiUrl } from "./context/apiConfig";
 
 const ApiConfigWidget: React.FC = () => {
-  const currentUrl = localStorage.getItem("blockcert_api_url") || "http://localhost:3001";
+  const currentUrl = getApiUrl();
   const [isOpen, setIsOpen] = useState(false);
   const [inputValue, setInputValue] = useState(currentUrl);
 

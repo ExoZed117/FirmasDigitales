@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { getApiUrl } from "../context/apiConfig";
 
 interface CollaboratorPortalProps {
   token: string;
@@ -192,7 +193,7 @@ export const CollaboratorPortal: React.FC<CollaboratorPortalProps> = ({ token })
     try {
       setLoading(true);
       setError(null);
-      const API_URL = localStorage.getItem("blockcert_api_url") || "http://localhost:3001";
+      const API_URL = getApiUrl();
       const res = await fetch(`${API_URL}/api/documents/sign/${token}`);
       if (!res.ok) {
         const errJson = await res.json();
@@ -314,7 +315,7 @@ export const CollaboratorPortal: React.FC<CollaboratorPortalProps> = ({ token })
       setLoading(true);
       setError(null);
 
-      const API_URL = localStorage.getItem("blockcert_api_url") || "http://localhost:3001";
+      const API_URL = getApiUrl();
       const response = await fetch(`${API_URL}/api/documents/sign/${token}`, {
         method: "POST",
         headers: {
