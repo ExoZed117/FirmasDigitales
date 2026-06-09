@@ -123,8 +123,8 @@ const MainApp: React.FC = () => {
   // Simple routing detection on load
   useEffect(() => {
     // 0. Check for apiUrl parameter to dynamically configure backend connection
-    const params = new URLSearchParams(window.location.search);
-    const apiUrlParam = params.get("apiUrl");
+    const urlParams = new URLSearchParams(window.location.search);
+    const apiUrlParam = urlParams.get("apiUrl");
     if (apiUrlParam) {
       let formattedUrl = apiUrlParam.trim();
       if (formattedUrl.endsWith("/")) {
@@ -132,8 +132,8 @@ const MainApp: React.FC = () => {
       }
       localStorage.setItem("blockcert_api_url", formattedUrl);
       
-      params.delete("apiUrl");
-      const newSearch = params.toString();
+      urlParams.delete("apiUrl");
+      const newSearch = urlParams.toString();
       const newUrl = window.location.pathname + (newSearch ? `?${newSearch}` : "") + window.location.hash;
       window.history.replaceState({}, "", newUrl);
       window.location.reload();
