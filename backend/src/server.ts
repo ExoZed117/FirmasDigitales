@@ -9,6 +9,10 @@ import { v4 as uuidv4 } from "uuid";
 import dotenv from "dotenv";
 import { ethers } from "ethers";
 import QRCode from "qrcode";
+import { exec } from "child_process";
+import { promisify } from "util";
+
+const execPromise = promisify(exec);
 
 import { sequelize, User, Document, Collaborator, AuditLog } from "./models";
 // Importamos de manera segura nuestro nuevo servicio de notificaciones modular
@@ -275,10 +279,11 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage,
   fileFilter: (req, file, cb) => {
-    if (file.mimetype === "application/pdf") {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (file.mimetype === "application/pdf" || ext === ".pdf" || ext === ".docx" || ext === ".doc") {
       cb(null, true);
     } else {
-      cb(new Error("Solo se permiten archivos PDF"));
+      cb(new Error("Solo se permiten archivos PDF o Word (.docx, .doc)"));
     }
   },
 });
@@ -313,7 +318,57 @@ app.post("/api/documents", upload.single("pdf"), async (req, res) => {
   try {
     const { codigo, estudiante, estudianteWallet, collaboratorsJson, requireFacial } = req.body;
     if (!req.file) {
-      return res.status(400).json({ error: "Debe subir un archivo PDF" });
+      return res.status(400).json({ error: "Debe subir un archivo de certificado" });
+    }
+
+    // Convert Word to PDF if uploaded file is docx or doc
+    const ext = path.extname(req.file.originalname).toLowerCase();
+    const isWord = ext === ".docx" || ext === ".doc";
+
+    if (isWord) {
+      const docxPath = path.resolve(req.file.path);
+      const pdfFilename = req.file.filename.replace(/\.(docx|doc)$/i, "") + ".pdf";
+      const pdfPath = path.join(originalDir, pdfFilename);
+
+      const powershellCmd = `
+$word = New-Object -ComObject Word.Application;
+$word.Visible = $false;
+try {
+    $doc = $word.Documents.Open('${docxPath.replace(/\\/g, '\\\\')}');
+    $doc.SaveAs('${pdfPath.replace(/\\/g, '\\\\')}', 17);
+    $doc.Close();
+    Write-Host "Success";
+} catch {
+    Write-Error $_;
+} finally {
+    $word.Quit();
+}
+      `.trim();
+
+      const escapedCmd = powershellCmd.replace(/\n/g, ' ');
+      try {
+        await execPromise(`powershell -Command "${escapedCmd}"`);
+
+        if (!fs.existsSync(pdfPath)) {
+          throw new Error("No se pudo generar el archivo PDF.");
+        }
+
+        // Delete original Word file
+        try {
+          fs.unlinkSync(docxPath);
+        } catch (unlinkErr) {
+          console.warn("No se pudo eliminar el archivo Word original:", unlinkErr);
+        }
+
+        // Update req.file details to reflect PDF
+        req.file.filename = pdfFilename;
+        req.file.path = pdfPath;
+        req.file.mimetype = "application/pdf";
+      } catch (convErr: any) {
+        console.error("Error al convertir Word a PDF:", convErr);
+        await transaction.rollback();
+        return res.status(500).json({ error: `Error en la conversion del archivo Word a PDF: ${convErr.message}` });
+      }
     }
 
     const collaboratorsData = JSON.parse(collaboratorsJson || "[]");
