@@ -49,7 +49,8 @@ export class NotificationService {
    * CANAL 1: Envío de Correo Electrónico Real via SMTP
    */
   static async sendEmail(payload: NotificationPayload): Promise<boolean> {
-    const urlFirma = `http://localhost:5173/sign/${payload.token}`;
+    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+    const urlFirma = `${frontendUrl}/sign/${payload.token}`;
     
     try {
       await transporter.sendMail({
@@ -90,7 +91,8 @@ export class NotificationService {
     }
 
     try {
-      const urlFirma = `http://localhost:5173/sign/${payload.token}`;
+      const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+      const urlFirma = `${frontendUrl}/sign/${payload.token}`;
       let cleanPhone = payload.toPhone.replace(/\D/g, "");
       
       // Auto-completar prefijo de Bolivia (591) si tiene 8 dígitos

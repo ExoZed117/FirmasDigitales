@@ -903,7 +903,7 @@ export const AdminPortal: React.FC = () => {
                                       <button
                                         className="btn btn-secondary"
                                         style={{ padding: "0.1rem 0.4rem", fontSize: "0.62rem", borderRadius: "4px" }}
-                                        onClick={() => copyToClipboard(`http://localhost:5173/?token=${c.token}`)}
+                                        onClick={() => copyToClipboard(`${window.location.origin}/?token=${c.token}`)}
                                         title="Copiar link de firma para enviar a este colaborador"
                                       >
                                         Enlace de Firma
